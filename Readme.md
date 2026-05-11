@@ -6,6 +6,67 @@ This repository is being built for the **[Privacy-by-Design dApp Buildathon](htt
 
 ---
 
+## Wave 4 implementation status
+
+Wave 4 is now implemented as a working Hardhat + React app:
+
+- `DarkPoolDex.sol` stores encrypted price, amount, and side using CoFHE encrypted inputs.
+- `tryMatch` computes crossing logic with FHE operations (`gte`, `and`, `not`, `min`, `select`) without exposing resting order data.
+- `finalizeMatch` verifies `decryptForTx` threshold signatures for the fill result before moving escrowed ERC-20 balances.
+- The React UI connects a wallet, links deployed addresses, approves/deposits escrow, places encrypted orders, prepares matches, decrypts fill handles, and finalizes settlement.
+- The test suite covers matched settlement, non-crossing settlement, and cancellation through CoFHE Hardhat mocks.
+
+What remains for Wave 5: partial-fill accounting, production keeper automation, batch auctions, fee logic, live liquidity pairs, and a deeper threat-model/security review.
+
+## Quick start
+
+```bash
+npm install
+npm run check
+npm run dev
+```
+
+The dev app runs at `http://127.0.0.1:5173`.
+
+Useful commands:
+
+| Command | Purpose |
+|---------|---------|
+| `npm run compile` | Compile Solidity and generate TypeChain bindings. |
+| `npm test` | Run CoFHE mock end-to-end contract tests. |
+| `npm run build` | Build the production React client. |
+| `npm run deploy:local` | Deploy mock base token, mock quote token, and `DarkPoolDex` to a local Hardhat node. |
+| `npm run demo:local` | Run an encrypted buy/sell match and settlement against the localhost deployment. |
+| `npm run deploy:arb-sepolia` | Deploy to Arbitrum Sepolia using `PRIVATE_KEY`. |
+| `npm run export:abi` | Export contract ABIs to the frontend. |
+
+## Deployment
+
+Create a local `.env` file when deploying. Do not commit it.
+
+```bash
+PRIVATE_KEY=0x...
+ARBITRUM_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc
+```
+
+Then run:
+
+```bash
+npm run deploy:arb-sepolia
+```
+
+The deploy script writes `deployments/<network>.json` and `src/generated/deployment.json`. The frontend also accepts:
+
+```bash
+VITE_DARK_POOL_DEX_ADDRESS=0x...
+VITE_BASE_TOKEN_ADDRESS=0x...
+VITE_QUOTE_TOKEN_ADDRESS=0x...
+```
+
+The provided Wave 4 deployment attempt reached Arbitrum Sepolia but could not complete because the deployer account had no test ETH for gas.
+
+---
+
 ## What is this app?
 
 **Dark Pool DEX** is a confidential DeFi primitive: a **dark pool**–style DEX where:
