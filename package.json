@@ -12,6 +12,7 @@
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
     "deploy:arb-sepolia": "hardhat run scripts/deploy.ts --network arb-sepolia",
+    "deploy:vercel": "vercel --prod",
     "demo:local": "hardhat run scripts/demo-local.ts --network localhost",
     "export:abi": "tsx scripts/export-abi.ts",
     "typecheck:hardhat": "tsc -p tsconfig.json --noEmit",

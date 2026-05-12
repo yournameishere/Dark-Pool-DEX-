@@ -16,7 +16,18 @@ Wave 4 is now implemented as a working Hardhat + React app:
 - The React UI connects a wallet, links deployed addresses, approves/deposits escrow, places encrypted orders, prepares matches, decrypts fill handles, and finalizes settlement.
 - The test suite covers matched settlement, non-crossing settlement, and cancellation through CoFHE Hardhat mocks.
 
-What remains for Wave 5: partial-fill accounting, production keeper automation, batch auctions, fee logic, live liquidity pairs, and a deeper threat-model/security review.
+### Wave 5 production hardening roadmap
+
+Wave 4 proves the encrypted order lifecycle end to end. Wave 5 is where the prototype becomes production-grade:
+
+- **Partial fills and remaining balances** — replace current whole-order fill accounting with encrypted remaining quantity, multiple fills per order, and safe cancellation of partially filled orders.
+- **Production keeper / matcher network** — move from manual pair submission to a reliable keeper flow with retrying, monitoring, fair pair selection, and clear liveness guarantees.
+- **Batch auctions** — add batch-based matching to reduce timing leakage, improve fairness, and make order ordering less exploitable.
+- **Real token support** — replace demo tokens with configured live pairs, token decimal handling, allowance UX, and per-market risk limits.
+- **Fees and protocol accounting** — add maker/taker fees, fee withdrawal controls, and transparent fee events that do not reveal private order data.
+- **Stronger privacy controls** — reduce metadata leakage, add selective disclosure flows, and tighten permit/decryption policy for users, counterparties, and auditors.
+- **Security review** — formal threat model, invariant tests, fuzzing, gas griefing analysis, reentrancy/escrow review, and an external audit before mainnet funds.
+- **Production deployment ops** — funded testnet/mainnet deployer, verified contracts, Vercel production env vars, monitoring, runbooks, and incident response.
 
 ## Quick start
 
@@ -38,6 +49,7 @@ Useful commands:
 | `npm run deploy:local` | Deploy mock base token, mock quote token, and `DarkPoolDex` to a local Hardhat node. |
 | `npm run demo:local` | Run an encrypted buy/sell match and settlement against the localhost deployment. |
 | `npm run deploy:arb-sepolia` | Deploy to Arbitrum Sepolia using `PRIVATE_KEY`. |
+| `npm run deploy:vercel` | Deploy the frontend to Vercel production. |
 | `npm run export:abi` | Export contract ABIs to the frontend. |
 
 ## Deployment
@@ -64,6 +76,27 @@ VITE_QUOTE_TOKEN_ADDRESS=0x...
 ```
 
 The provided Wave 4 deployment attempt reached Arbitrum Sepolia but could not complete because the deployer account had no test ETH for gas.
+
+### Vercel deployment
+
+The frontend is Vercel-ready through `vercel.json`.
+
+Production frontend: [https://dark-pool-dex.vercel.app](https://dark-pool-dex.vercel.app)
+
+```bash
+npm run build
+npm run deploy:vercel
+```
+
+Set these Vercel environment variables after the contracts are deployed to a public testnet:
+
+```bash
+VITE_DARK_POOL_DEX_ADDRESS=0x...
+VITE_BASE_TOKEN_ADDRESS=0x...
+VITE_QUOTE_TOKEN_ADDRESS=0x...
+```
+
+Until those are configured, the hosted UI deliberately starts in a contract-unlinked state rather than shipping localhost addresses.
 
 ---
 
