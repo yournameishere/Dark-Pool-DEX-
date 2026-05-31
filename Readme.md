@@ -6,28 +6,24 @@ This repository is being built for the **[Privacy-by-Design dApp Buildathon](htt
 
 ---
 
-## Wave 4 implementation status
+## Wave 5 implementation status
 
-Wave 4 is now implemented as a working Hardhat + React app:
+Wave 5 is implemented as a testnet-ready Hardhat + React app with the full encrypted order lifecycle:
 
-- `DarkPoolDex.sol` stores encrypted price, amount, and side using CoFHE encrypted inputs.
-- `tryMatch` computes crossing logic with FHE operations (`gte`, `and`, `not`, `min`, `select`) without exposing resting order data.
-- `finalizeMatch` verifies `decryptForTx` threshold signatures for the fill result before moving escrowed ERC-20 balances.
-- The React UI connects a wallet, links deployed addresses, approves/deposits escrow, places encrypted orders, prepares matches, decrypts fill handles, and finalizes settlement.
-- The test suite covers matched settlement, non-crossing settlement, and cancellation through CoFHE Hardhat mocks.
+- `DarkPoolDex.sol` stores encrypted price, original amount, remaining amount, and side using CoFHE encrypted inputs.
+- `tryMatch`, `tryBatchMatch`, and `tryBatchMatches` compute crossing, fill size, fill price, and post-fill closed flags with FHE operations (`gte`, `and`, `not`, `min`, `select`, `sub`, `eq`) without exposing resting order data.
+- `finalizeMatch` verifies `decryptForTx` threshold signatures for match state, fill amount, fill price, and per-order filled flags before moving ERC-20 escrow.
+- Partial fills are supported across multiple counterparties with encrypted remaining balances, stale-match nonce protection, and cancellation of partially filled orders.
+- Order-specific public reserve amounts were removed so order placement no longer broadcasts side-specific size/notional collateral. Settlement now verifies live escrow availability and invalidates orders whose escrow is no longer available.
+- Keeper operations are supported with permissionless or allowlisted matcher modes, retrying keeper script, deterministic FIFO pair attempts, batch-window checks, and finalized-pair replay protection.
+- Batch auctions are supported through configurable batch duration and closed-batch matching.
+- Real-token readiness includes ERC-20 metadata decimals, allowance-aware deposits, configured token addresses, per-match risk-limit snapshots, and dynamic frontend formatting.
+- Maker/taker fees accrue in quote escrow, emit transparent fill-fee events, and can be withdrawn by the owner through protocol accounting controls.
+- Selective disclosure helpers let traders or approved operators grant order/match ciphertext access to counterparties, auditors, or keepers without making resting order data public.
+- The React app includes owner-only market controls for pause/open, matcher policy, fill reveal policy, fee config, risk limits, keeper allowlisting, and fee withdrawal.
+- The test suite covers partial fills, non-crossing settlement, stale prepared matches, fee accounting, keeper permissions, batch closure, zero-quote rejection, risk snapshots, escrow invalidation, and partial cancellation through CoFHE Hardhat mocks.
 
-### Wave 5 production hardening roadmap
-
-Wave 4 proves the encrypted order lifecycle end to end. Wave 5 is where the prototype becomes production-grade:
-
-- **Partial fills and remaining balances** — replace current whole-order fill accounting with encrypted remaining quantity, multiple fills per order, and safe cancellation of partially filled orders.
-- **Production keeper / matcher network** — move from manual pair submission to a reliable keeper flow with retrying, monitoring, fair pair selection, and clear liveness guarantees.
-- **Batch auctions** — add batch-based matching to reduce timing leakage, improve fairness, and make order ordering less exploitable.
-- **Real token support** — replace demo tokens with configured live pairs, token decimal handling, allowance UX, and per-market risk limits.
-- **Fees and protocol accounting** — add maker/taker fees, fee withdrawal controls, and transparent fee events that do not reveal private order data.
-- **Stronger privacy controls** — reduce metadata leakage, add selective disclosure flows, and tighten permit/decryption policy for users, counterparties, and auditors.
-- **Security review** — formal threat model, invariant tests, fuzzing, gas griefing analysis, reentrancy/escrow review, and an external audit before mainnet funds.
-- **Production deployment ops** — funded testnet/mainnet deployer, verified contracts, Vercel production env vars, monitoring, runbooks, and incident response.
+Mainnet funds still require an external audit and production incident process. The current target is public testnet deployment for Wavehack judging.
 
 ## Quick start
 
@@ -48,7 +44,12 @@ Useful commands:
 | `npm run build` | Build the production React client. |
 | `npm run deploy:local` | Deploy mock base token, mock quote token, and `DarkPoolDex` to a local Hardhat node. |
 | `npm run demo:local` | Run an encrypted buy/sell match and settlement against the localhost deployment. |
+| `npm run keeper:local` | Run one keeper tick against the localhost deployment. |
+| `npm run deploy:sepolia` | Deploy to Ethereum Sepolia using `PRIVATE_KEY`. |
 | `npm run deploy:arb-sepolia` | Deploy to Arbitrum Sepolia using `PRIVATE_KEY`. |
+| `npm run deploy:base-sepolia` | Deploy to Base Sepolia using `PRIVATE_KEY`. |
+| `npm run mint:sepolia` | Mint deployed mock base/quote tokens to the deployer or `MINT_TO`. |
+| `npm run keeper:arb-sepolia` | Run one keeper tick against the Arbitrum Sepolia deployment. |
 | `npm run deploy:vercel` | Deploy the frontend to Vercel production. |
 | `npm run export:abi` | Export contract ABIs to the frontend. |
 
@@ -59,6 +60,9 @@ Create a local `.env` file when deploying. Do not commit it.
 ```bash
 PRIVATE_KEY=0x...
 ARBITRUM_SEPOLIA_RPC_URL=https://sepolia-rollup.arbitrum.io/rpc
+MAKER_FEE_BPS=5
+TAKER_FEE_BPS=15
+BATCH_DURATION_SECONDS=60
 ```
 
 Then run:
@@ -67,15 +71,58 @@ Then run:
 npm run deploy:arb-sepolia
 ```
 
-The deploy script writes `deployments/<network>.json` and `src/generated/deployment.json`. The frontend also accepts:
+The deploy script writes `deployments/<network>.json` and `src/generated/deployment.json` with Wave 5 market config, token decimals, risk limits, and keeper settings. The frontend also accepts:
 
 ```bash
 VITE_DARK_POOL_DEX_ADDRESS=0x...
 VITE_BASE_TOKEN_ADDRESS=0x...
 VITE_QUOTE_TOKEN_ADDRESS=0x...
+VITE_CHAIN_ID=11155111
 ```
 
-The provided Wave 4 deployment attempt reached Arbitrum Sepolia but could not complete because the deployer account had no test ETH for gas.
+Optional deploy-time controls:
+
+```bash
+BASE_TOKEN_ADDRESS=0x...        # use a live base token instead of deploying a mock
+QUOTE_TOKEN_ADDRESS=0x...       # use a live quote token instead of deploying a mock
+FEE_RECIPIENT=0x...
+MIN_FILL_AMOUNT=1
+MAX_FILL_AMOUNT=0              # 0 means no cap
+MAX_QUOTE_VALUE=0              # 0 means no cap
+PERMISSIONLESS_MATCHING=true
+PUBLIC_FILL_REVEAL=true
+KEEPER_ADDRESSES=0xabc...,0xdef...
+```
+
+Never commit a private key or `.env`.
+
+### Mock token minting
+
+Deployments that do not set `BASE_TOKEN_ADDRESS` and `QUOTE_TOKEN_ADDRESS` use demo mock ERC-20s with a one-claim-per-wallet faucet. Users can claim demo balances in the frontend, and the owner can still mint manually when needed:
+
+```bash
+PRIVATE_KEY=0x... MINT_TO=0x... MINT_BASE_AMOUNT=10 MINT_QUOTE_AMOUNT=50000 npm run mint:sepolia
+```
+
+Omit `MINT_TO` to mint to the deploying wallet. Use `MINT_BASE_AMOUNT=0` or `MINT_QUOTE_AMOUNT=0` to skip one side.
+
+### Keeper operations
+
+Run a single keeper tick:
+
+```bash
+npm run keeper:arb-sepolia
+```
+
+Run continuously:
+
+```bash
+KEEPER_RUN_FOREVER=true KEEPER_INTERVAL_MS=15000 npm run keeper:arb-sepolia
+```
+
+The keeper scans active public order IDs, attempts fair FIFO candidate pairs in both directions without plaintext order knowledge, finalizes public fill decryptions, skips finalized ordered pairs, and retries transient failures.
+
+For local demos, start `npm run node`, rerun `npm run deploy:local` to create a fresh ignored `deployments/localhost.json`, then run `npm run demo:local` or `npm run keeper:local`.
 
 ### Vercel deployment
 
@@ -150,15 +197,16 @@ This project uses that stack so **privacy and decentralization** are aligned: **
 | Aspect | Behavior |
 |--------|----------|
 | **Place order** | User encrypts price, amount, and side (buy/sell); submits ciphertexts to the contract. |
-| **Order storage** | Orders live in contract storage as **encrypted fields** (`euint128`, `ebool`, etc.), tied to owner and expiry. |
-| **Matching** | Encrypted checks (e.g. **buy price ≥ sell price**), **fill size** as homomorphic **min** of sizes, **fill price** derived under encryption (e.g. midpoint or taker price—product decision). |
-| **Settlement** | When a match is valid, **decrypt** only the **fill** path for token transfers and events—not necessarily every historical order field. |
-| **Frontend** | Users use **CoFHE client flows** (encrypt before `placeOrder`, permits/decrypt where the design allows) for a **privacy-aware UX**. |
+| **Order storage** | Orders store encrypted price, original amount, remaining amount, and side, tied to owner, expiry, fill nonce, and batch without side-specific public order reserves. |
+| **Escrow model** | Users deposit ERC-20s into public escrow, while order placement avoids side-specific public reserve locks; settlement cancels orders if the required live escrow is unavailable. |
+| **Matching** | Encrypted checks (`buy price >= sell price`), encrypted fill-size `min`, encrypted remaining-amount subtraction, and encrypted closed flags. |
+| **Settlement** | `decryptForTx` reveals only fill outcome and closed flags needed for ERC-20 settlement, fee accounting, and stale-match safety. |
+| **Frontend** | Wallet, CoFHE encryption/decryption, allowance-aware escrow, partial fill finalization, batch matching, cancellation, fees, and disclosure controls. |
 
 ### What “MEV-proof” means here (honest framing)
 
 - **Architectural**: mempool observers **cannot** read plaintext prices/sizes off the **encrypted** order representation the way they do on a public order book.
-- **Wave 1** focuses on **proving the concept** (encrypted orders + match path + settlement demo), not full production **on-chain** matching at scale. Later waves can move matching **on-chain**, add **batch auctions**, and harden **selective disclosure** and **permits**.
+- **Wave 5 scope** focuses on a production-grade public-testnet implementation: encrypted orders, encrypted partial fills, batch/keeper operations, fee accounting, and selective disclosure hooks. Mainnet deployment still requires external audit work.
 
 ---
 
@@ -202,7 +250,7 @@ This section describes **who benefits** and **concrete situations** where a **se
 
 **Situation:** Teams need a **clear, judge-friendly** demo that shows **Fhenix CoFHE** in production: encrypt → compute on ciphertext → decrypt where allowed.
 
-**How this project helps:** **Wave 1** delivers a **minimal vertical slice**: deploy **encrypted** `placeOrder`, **match** with FHE ops, **settle** with controlled decrypt—exactly the **story** the buildathon rewards.
+**How this project helps:** **Wave 5** delivers a judge-friendly but production-grade testnet slice: deploy encrypted orders, match with FHE ops, settle partial fills with decrypt proofs, run keepers/batches, and show fee/risk/disclosure controls.
 
 ### Use-case summary
 
@@ -211,7 +259,7 @@ This section describes **who benefits** and **concrete situations** where a **se
 | Retail DeFi | Sandwiches, front-running | Unreadable **order content** pre-fill |
 | Pros / MMs | Quote & inventory leakage | **Dark pool**-style **sealed** book |
 | Treasuries | Size signaling | **Hidden** size/price **before** match |
-| Institutions | Public flow / compliance | **Selective** disclosure path (roadmap) |
+| Institutions | Public flow / compliance | **Selective** disclosure controls |
 | Ecosystem | Composability | **Reusable** encrypted order primitive |
 | Buildathon | Demo + narrative | **End-to-end** CoFHE **proof** |
 
@@ -224,31 +272,31 @@ This section describes **who benefits** and **concrete situations** where a **se
 **Typical DEX / CLOB on-chain:**  
 Order or swap intent is **visible** (or inferable) **before** execution → bots **react**.
 
-**Dark Pool DEX:**  
+**Dark Pool DEX:**
 Orders are **ciphertexts**; **matching** runs on **encrypted state**. Outsiders don’t get plaintext **prices and sizes** for free off the book.
 
-### 2. Smart contract layers (target architecture)
+### 2. Smart contract layers (implementation architecture)
 
-The implementation is organized around **three logical contracts** (names may map to one or more `.sol` files in the repo):
+The implementation is a single deployable `DarkPoolDex.sol` with clear logical modules:
 
-1. **`OrderBook.sol`** — **Encrypted order registry**  
-   - Stores `Order` structs with `euint128 price`, `euint128 amount`, `ebool isBuy`, `owner`, `expiry`.  
+1. **`OrderBook.sol`** — **Encrypted order registry**
+   - Stores `Order` structs with `euint128 price`, `euint128 originalAmount`, `euint128 remainingAmount`, `ebool isBuy`, `owner`, `expiry`, `batchId`, and `fillNonce`.
    - `placeOrder` accepts **client-encrypted** inputs (`inEuint128`, `inEbool`), converts via `FHE.asEuint128` / `FHE.asEbool`, assigns IDs, and sets **FHE permissions** (`allowThis`, `allow` to owner) for later operations.
 
-2. **`MatchingEngine.sol`** — **Encrypted matching**  
-   - Takes candidate order pairs (Wave 1 may use a **simple off-chain script** calling `tryMatch` for demos).  
-   - Uses **`FHE.gte`**, **`FHE.min`**, **`FHE.select`** so **comparisons and fills** stay **encrypted** until you deliberately decrypt for settlement.  
+2. **`MatchingEngine.sol`** — **Encrypted matching**
+   - Takes candidate order pairs from users or keepers through `tryMatch`, `tryBatchMatch`, or `tryBatchMatches`.
+   - Uses **`FHE.gte`**, **`FHE.min`**, **`FHE.select`**, **`FHE.sub`**, and **`FHE.eq`** so **comparisons, fills, remaining balances, and closed flags** stay encrypted until settlement.
    - If prices don’t cross, **no meaningful fill**—without revealing either side’s plaintext.
 
-3. **`Settlement.sol`** — **Selective decryption & transfers**  
-   - Decrypts **fill price** and **fill amount** (and match flag) when appropriate.  
-   - Executes **ERC-20** transfers between counterparties.  
-   - Emits events that reflect **fills** (design goal: **not** broadcasting full resting book).
+3. **`Settlement.sol`** — **Selective decryption & transfers**
+   - Verifies `decryptForTx` proofs for match bit, fill price, fill amount, and closed flags.
+   - Executes **ERC-20** transfers, maker/taker fee accounting, risk-limit checks, and nonce-based stale-match protection.
+   - Emits events that reflect **fills** without revealing full resting orders.
 
 ### 3. Frontend (React + CoFHE)
 
-- **`useEncrypt`**: encrypt `price`, `amount`, `side` before calling `placeOrder`.  
-- **`useWrite`**: submit transactions to the order book contract.  
+- **`useEncrypt`**: encrypt `price`, `amount`, `side` before calling `placeOrder`.
+- **`useWrite`**: submit transactions to the order book contract.
 - **`useDecrypt`** (where permitted): show **fill results** or other **explicitly allowed** decrypted values to the user.
 
 This mirrors common **wagmi-style** mental models but with an **encrypt → transact → decrypt (where allowed)** loop.
@@ -265,7 +313,7 @@ This section describes **how the system is structured**, **how data moves**, and
 |------|--------|
 | **Confidentiality** | Order **price**, **amount**, and **side** are not plaintext in contract storage for arbitrary observers to read like a normal CLOB. |
 | **Correctness** | Matching and settlement follow **explicit rules** (crossing prices, fill qty, asset conservation). |
-| **Verifiability** | Logic runs **on-chain** under Fhenix rules; users do not rely on a **single** off-chain operator for **correctness** of the contract path (Wave 1 may still use a matcher **caller** for pairing). |
+| **Verifiability** | Logic runs **on-chain** under Fhenix rules; keepers propose pairs for liveness, but the contract verifies crossing, fill amount, remaining state, fees, and settlement. |
 | **Minimal disclosure** | Only **fill-related** values and **authorized** views decrypt when the design allows—not the entire history of every resting order in plaintext. |
 | **Evolvability** | **OrderBook / MatchingEngine / Settlement** can be extended (batching, fees, hooks) without collapsing into one unmaintainable contract. |
 
@@ -282,11 +330,11 @@ This section describes **how the system is structured**, **how data moves**, and
                              │ JSON-RPC / wallet
                              ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  Orchestration (Wave 1 — optional off-chain)                 │
+│  Orchestration (Wave 5 keeper)                               │
 │  Matcher script / keeper / bot                               │
-│  · Select (buyId, sellId) pairs (naive loop, scoring, etc.)  │
-│  · Call tryMatch(buyId, sellId) on-chain                     │
-│  Later: replaced or augmented by on-chain matching / auctions│
+│  · Select FIFO candidate IDs without plaintext order content │
+│  · Call tryMatch / tryBatchMatch on-chain                    │
+│  · Finalize decrypt-proof fill settlement                    │
 └────────────────────────────┬────────────────────────────────┘
                              │ transactions
                              ▼
@@ -312,31 +360,31 @@ This section describes **how the system is structured**, **how data moves**, and
 | **Client** | UX, key management for encryption, tx submission | Plaintext order → **ciphertext** args; receives **tx receipts**, optional **decrypted** fills |
 | **OrderBook** | Persistent **encrypted** orders, IDs, **expiry**, **owner**; **FHE.allow** for contract and user | `placeOrder(enc…)` → stored `Order`; exposes order **handles** to authorized callers |
 | **MatchingEngine** | Given two order IDs, compute **encrypted** price match, **fill qty**, **fill price**; drive `_settle` when rules say so | Reads `orders[buyId]`, `orders[sellId]`; outputs **encrypted** fill + **match flag** |
-| **Settlement** | **Decrypt** allowed values for **transfer**; emit **Fill** events; update balances / order remaining (future) | **Matched** fills → **token movements** between owners |
-| **Matcher (Wave 1)** | **Off-chain** process that proposes pairs—**does not** need to see plaintext if it only passes **IDs** (it may still see **public** metadata like IDs and timing depending on implementation) | Chain of `tryMatch` calls |
+| **Settlement** | **Decrypt** allowed fill values for **transfer**; emit fill/fee events; update encrypted remaining balances | **Matched** fills → token movement, fees, nonce updates |
+| **Keeper** | **Off-chain** liveness process that proposes pairs without plaintext order content; can be permissionless or allowlisted | `tryMatch`, `tryBatchMatch`, `finalizeMatch` calls |
 
 ### Data flows
 
 **A. Place order**
 
-1. User enters **price**, **amount**, **side** in the UI.  
-2. Client runs **CoFHE encrypt** for each field (correct **FheUType**).  
-3. User signs **`placeOrder`**; tx lands on-chain.  
-4. Contract stores **ciphertext handles**; **`FHE.allowThis`** / **`FHE.allow`** wire **future** matching and **user** decryption policy.  
+1. User enters **price**, **amount**, **side** in the UI.
+2. Client runs **CoFHE encrypt** for each field (correct **FheUType**).
+3. User signs **`placeOrder`**; tx lands on-chain.
+4. Contract stores **ciphertext handles**; **`FHE.allowThis`** / **`FHE.allow`** wire matching, settlement, user view, keeper, and disclosure permissions.
 5. Observers may still see **that** an order exists depending on what is public (e.g. **order ID**, **owner**, **expiry**)—**minimizing metadata leakage** is a **product/engineering** choice for later iterations.
 
-**B. Match (Wave 1: off-chain caller)**
+**B. Match (keeper or user caller)**
 
-1. Matcher chooses **`buyId`**, **`sellId`** (e.g. FIFO, random pair for demo, or scoring).  
-2. Contract **`tryMatch`**: loads **encrypted** fields, runs **`FHE.gte`**, **`FHE.min`**, **`FHE.select`**, etc.  
-3. If not crossing, **fill** path stays **empty/zero** under encryption—**no** need to reveal raw bid/ask.  
-4. If crossing, **encrypted** fill price/qty feed **`_settle`**.
+1. Matcher chooses **`buyId`**, **`sellId`** using public IDs and batch metadata, not plaintext price/amount.
+2. Contract **`tryMatch`** or **`tryBatchMatch`** loads **encrypted** fields, runs **`FHE.gte`**, **`FHE.min`**, **`FHE.select`**, **`FHE.sub`**, and **`FHE.eq`**.
+3. If not crossing, **fill** path stays **empty/zero** under encryption—**no** need to reveal raw bid/ask.
+4. If crossing, encrypted fill price/qty, encrypted remaining amounts, and encrypted closed flags feed **`finalizeMatch`**.
 
 **C. Settle**
 
-1. **`_settle`** decrypts **only** what the contract allows for **transfer** (fill price, fill amount, match bit).  
-2. **ERC-20** transfers execute **quote** and **base** legs.  
-3. **`Fill`** event may expose **executed** price and size (trade-off: **transparency of execution** vs **hiding** even fills—product decision for later versions).
+1. **`finalizeMatch`** verifies threshold signatures for **only** the fill values needed for transfer and order closure.
+2. **ERC-20** transfers execute **quote** and **base** legs with maker/taker fees and risk-limit checks.
+3. **`MatchFinalized`** exposes executed price, size, fees, and closed flags; the full resting order remains encrypted.
 
 ### Trust boundaries
 
@@ -344,37 +392,38 @@ This section describes **how the system is structured**, **how data moves**, and
 |------|-------------------|
 | **User’s browser / wallet** | Correct **encryption** of user intent; **key safety**; not tampering with client code |
 | **Chain + Fhenix CoFHE** | **Correct execution** of contract logic and **FHE** semantics; **finality** of state |
-| **Matcher (Wave 1)** | **Liveness** and **pair selection**—which matches get attempted **first**; should **not** be able to **decrypt** orders **unless** given keys (default: matcher only sends **IDs**) |
+| **Keeper / matcher** | **Liveness** and **pair selection**—which matches get attempted **first**; should **not** be able to **decrypt** resting orders unless given disclosure permissions |
 | **Counterparty** | Sees **fill** outcome and tokens as in any trade—**not** the same as seeing your full **historical** resting book if that stays encrypted |
 
 ### Threat and privacy notes (engineering honesty)
 
-- **Metadata:** Even with **encrypted** fields, **timestamps**, **gas patterns**, or **public** **owner** addresses may leak **some** information—mitigations include **batching**, **delayed revelation**, and **minimal** public fields.  
+- **Metadata:** Even with **encrypted** fields, **timestamps**, **gas patterns**, escrow deposits, or **public** **owner** addresses may leak **some** information—mitigations include **batching**, **delayed revelation**, and **minimal** public fields.
 - **Fill transparency:** If **every** fill is **public** on-chain, **post-trade** information still exists; the **main win** is **pre-trade** book **opacity**.  
 - **MEV:** **Architectural** hiding of **order content** is the **focus**; **ordering** of txs in the **same** block can still be a topic for **advanced** designs.
 
-### Wave 1 vs later waves (system evolution)
+### Wave 5 capabilities
 
-| Aspect | Wave 1 (demo) | Later waves |
-|--------|----------------|-------------|
-| **Pair selection** | Off-chain script | On-chain loop, **batch auctions**, or **solver** networks |
-| **Liquidity** | Thin / test tokens | Real pairs, **fees**, **LP** incentives |
-| **UX** | Place + match + fill view | Full **order book** **metadata** strategy, **cancel**, **partial fills** |
-| **Security review** | Best-effort | Audits, **formal** threat modeling |
+| Aspect | Implemented behavior |
+|--------|----------------------|
+| **Pair selection** | Permissionless or allowlisted keeper flow with FIFO candidate attempts and replay protection |
+| **Batching** | Configurable closed-batch matching through `tryBatchMatch` and `tryBatchMatches` |
+| **Liquidity** | Configured ERC-20 pairs, token decimals, allowance-aware escrow, live escrow settlement checks, risk snapshots, and maker/taker fees |
+| **UX** | Place, deposit, withdraw, match, finalize, cancel partial orders, inspect fees, and grant disclosure |
+| **Security review** | Reentrancy guards, stale-match nonces, focused tests, and explicit external-audit requirement before mainnet funds |
 
 ### Design principles (recap)
 
-1. **Minimize decryption surface** — decrypt **fills** and **user-owned** views under **permits**, not the entire book.  
-2. **Clear separation** — **storage** (OrderBook) vs **matching** (MatchingEngine) vs **asset movement** (Settlement).  
-3. **Wave 1 honesty** — off-chain **pairing** + on-chain **FHE** **truth** for **match/settle** is enough for a **strong** hackathon story.  
-4. **Future-proofing** — same **encrypted order** core extends to **auctions** and **institutional** **disclosure** flows.
+1. **Minimize decryption surface** — decrypt **fills** and **user-owned** views under **permits**, not the entire book.
+2. **Clear separation** — **storage** (OrderBook) vs **matching** (MatchingEngine) vs **asset movement** (Settlement).
+3. **Operational liveness** — keepers can propose pairs, but cannot alter encrypted matching or settlement truth.
+4. **Future-proofing** — the same **encrypted order** core extends to solver networks, richer auctions, and institutional disclosure flows.
 
 ### Tech stack (reference)
 
 | Layer | Technology |
 |-------|--------------|
 | **FHE on-chain** | `@fhenixprotocol/cofhe/contracts/FHE.sol`, Solidity encrypted types |
-| **Client** | `@cofhe/react` (`useEncrypt`, `useWrite`, `useDecrypt`) |
+| **Client** | `@cofhe/sdk` with React + viem wallet clients for encrypt → transact → decrypt-proof settlement |
 | **Network (buildathon)** | **Arbitrum Sepolia** (also: Sepolia, Base Sepolia per Fhenix docs) |
 | **Tooling** | Hardhat + Fhenix CoFHE plugin for local/dev workflows |
 
@@ -389,20 +438,14 @@ This project fits the buildathon’s **Confidential DeFi** theme:
 - **Private positions, sealed-bid style mechanics, MEV-protected execution** — exactly the narrative in the program materials.
 - **Privacy-by-design** — confidentiality is **in the architecture** (encrypted order book + FHE matching), not an add-on.
 
-### Wave 1 target (minimal scoring submission)
+### Wave 5 submission target
 
-1. Deploy **`OrderBook.sol`** on **Arbitrum Sepolia** with **encrypted** `placeOrder` working.  
-2. A **simple off-chain script** that calls **`tryMatch`** for candidate pairs.  
-3. A **minimal React UI**: place order → encrypted submission → show **fill** via permitted decryption.  
-4. Documentation (this README) explaining **MEV resistance** and the **market framing** ($500M+ MEV / institutional gap).
+1. Deploy **`DarkPoolDex.sol`** on a CoFHE-supported public testnet with encrypted `placeOrder`, partial fills, fees, batch matching, and keeper permissions enabled.
+2. Run the keeper script to propose FIFO candidate pairs, retry transient failures, finalize decrypt-proof settlement, and avoid duplicate finalized ordered pairs.
+3. Use the React UI for wallet connection, real-token decimal display, allowance-aware escrow, encrypted orders, batch/manual match preparation, fill finalization, cancellation, and selective disclosure.
+4. Present the test suite and README as the security narrative: stale-match nonce protection, reentrancy guards, risk limits, fee accounting, and remaining audit requirements.
 
-### Later waves (roadmap direction)
-
-- **On-chain** matching and **batch auctions**  
-- **Real order book UI** (depth, cancellations, better UX)  
-- **Hardening**: permissions, griefing, economic and latency constraints
-
-Exact dates and grants follow the **Privacy-by-Design dApp Buildathon** schedule (Wave 1 → Wave 2 → …); see official announcements for current milestones.
+Exact dates and grants follow the **Privacy-by-Design dApp Buildathon** schedule; see official announcements for current milestones.
 
 ---
 
@@ -418,13 +461,13 @@ Exact dates and grants follow the **Privacy-by-Design dApp Buildathon** schedule
 
 | Question | Answer |
 |----------|--------|
-| **What is it?** | A **FHE-based dark pool DEX** prototype: encrypted orders, encrypted matching logic, selective decryption at settlement. |
-| **What does it do?** | Lets users **place hidden limit orders** and **match/settle** without broadcasting plaintext order book data like a traditional on-chain CLOB. |
+| **What is it?** | A **FHE-based dark pool DEX**: encrypted orders, encrypted partial-fill matching logic, selective decryption at settlement. |
+| **What does it do?** | Lets users **place hidden limit orders**, partially fill them across counterparties, and settle without broadcasting plaintext order book data like a traditional on-chain CLOB. |
 | **Why?** | **MEV** and **strategy leakage** on transparent DEXes; **institutional** demand for **confidential** execution. |
 | **Who uses it?** | **Retail** (sandwich resistance), **pros/MMs** (less quote leakage), **treasuries** (size not advertised), **institutions** (selective disclosure path), **other protocols** (composable sealed orders). See [Use cases](#use-cases). |
-| **How?** | **Fhenix CoFHE** in Solidity + **@cofhe/react** on the client; **place → match → settle** data flows; **OrderBook + MatchingEngine + Settlement** separation. |
-| **System design?** | **Client → (optional matcher) → on-chain FHE contracts**; **trust boundaries** for wallet, chain, matcher; **Wave 1** off-chain pairing + on-chain **truth**. See [System design](#system-design). |
-| **Best architecture?** | **Encrypted state** first, **minimal decryption**, **modular contracts**, **Wave 1** off-chain matcher → **later** on-chain scaling and auctions. |
+| **How?** | **Fhenix CoFHE** in Solidity + **@cofhe/sdk** on the client; **place → match/batch → decrypt proof → settle** data flows. |
+| **System design?** | **Client → keeper/user matcher → on-chain FHE contract**; trust boundaries for wallet, chain, keeper, and selective disclosure. See [System design](#system-design). |
+| **Best architecture?** | **Encrypted state** first, **minimal decryption**, keeper liveness without plaintext order access, batch fairness, and explicit audit requirements. |
 
 ---
 

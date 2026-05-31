@@ -9,6 +9,7 @@ typechain-types/
 .env.*.local
 deployments/*.local.json
 deployments/*.private.json
+deployments/localhost.json
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

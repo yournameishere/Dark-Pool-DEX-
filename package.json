@@ -1,8 +1,8 @@
 {
   "name": "dark-pool-dex",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
-  "description": "Wave 4 confidential dark-pool DEX using Fhenix CoFHE encrypted orders.",
+  "description": "Wave 5 confidential dark-pool DEX using Fhenix CoFHE encrypted orders.",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.app.json && vite build",
@@ -11,9 +11,19 @@
     "test": "hardhat test",
     "node": "hardhat node",
     "deploy:local": "hardhat run scripts/deploy.ts --network localhost",
+    "deploy:sepolia": "hardhat run scripts/deploy.ts --network sepolia",
     "deploy:arb-sepolia": "hardhat run scripts/deploy.ts --network arb-sepolia",
+    "deploy:base-sepolia": "hardhat run scripts/deploy.ts --network base-sepolia",
     "deploy:vercel": "vercel --prod",
+    "mint:local": "hardhat run scripts/mint-mock.ts --network localhost",
+    "mint:sepolia": "hardhat run scripts/mint-mock.ts --network sepolia",
+    "mint:arb-sepolia": "hardhat run scripts/mint-mock.ts --network arb-sepolia",
+    "mint:base-sepolia": "hardhat run scripts/mint-mock.ts --network base-sepolia",
     "demo:local": "hardhat run scripts/demo-local.ts --network localhost",
+    "keeper:local": "hardhat run scripts/keeper.ts --network localhost",
+    "keeper:sepolia": "hardhat run scripts/keeper.ts --network sepolia",
+    "keeper:arb-sepolia": "hardhat run scripts/keeper.ts --network arb-sepolia",
+    "keeper:base-sepolia": "hardhat run scripts/keeper.ts --network base-sepolia",
     "export:abi": "tsx scripts/export-abi.ts",
     "typecheck:hardhat": "tsc -p tsconfig.json --noEmit",
     "check": "npm run compile && npm run export:abi && npm run typecheck:hardhat && npm run test && npm run build"
@@ -40,6 +50,18 @@
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
+  },
+  "overrides": {
+    "ethjs-unit": {
+      "bn.js": "4.12.3"
+    },
+    "lodash": "4.18.1",
+    "number-to-bn": {
+      "bn.js": "4.12.3"
+    },
+    "serialize-javascript": "7.0.5",
+    "tmp": "0.2.7",
+    "undici": "6.26.0"
   },
   "engines": {
     "node": ">=20"
